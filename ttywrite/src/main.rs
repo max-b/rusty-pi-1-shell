@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use structopt::StructOpt;
-use serial::core::{CharSize, BaudRate, StopBits, FlowControl, SerialDevice, SerialPortSettings};
+use serial::SerialPort;
+use serial::core::{CharSize, BaudRate, StopBits, FlowControl, SerialDevice};
 use xmodem::{Xmodem, Progress};
 
 mod parsers;
@@ -47,12 +48,53 @@ struct Opt {
     raw: bool,
 }
 
-fn main() {
+fn progress_fn(progress: Progress) {
+    println!("Progress: {:?}", progress);
+}
+
+fn send_data<T, U> (in_stream: &mut T, out_stream: &mut U, raw: bool) -> Result<(u64), std::io::Error> 
+    where T: std::io::Read + std::fmt::Debug, U: std::io::Write + std::io::Read
+{
+    if raw {
+        std::io::copy(in_stream, out_stream)
+    } else {
+        match Xmodem::transmit_with_progress(in_stream, out_stream, progress_fn) {
+            Ok(num_bytes) => Ok(num_bytes as u64),
+            Err(err) => Err(err)
+        }
+    }
+}
+
+fn main() -> Result<(), std::io::Error> {
     use std::fs::File;
-    use std::io::{self, BufReader, BufRead};
+    use std::io::{self, BufReader};
 
     let opt = Opt::from_args();
-    let mut serial = serial::open(&opt.tty_path).expect("path points to invalid TTY");
+    let mut port = serial::open(&opt.tty_path).expect("path points to invalid TTY");
 
-    // FIXME: Implement the `ttywrite` utility.
+    port.reconfigure(&|settings| {
+        settings.set_baud_rate(opt.baud_rate)?;
+        settings.set_char_size(opt.char_width);
+        settings.set_stop_bits(opt.stop_bits);
+        settings.set_flow_control(opt.flow_control);
+        Ok(())
+    })?;
+
+    SerialDevice::set_timeout(&mut port, Duration::new(opt.timeout, 0))?;
+
+    let result = match opt.input {
+        Some(path) => {
+            let file = File::open(path)?;
+            let mut buf_reader = BufReader::new(file);
+            send_data(&mut buf_reader, &mut port, opt.raw)
+        },
+        None => {
+            send_data(&mut io::stdin(), &mut port, opt.raw)
+        }
+    };
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(err) => Err(err)
+    }
 }
