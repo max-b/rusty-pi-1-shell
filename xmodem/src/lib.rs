@@ -1,4 +1,8 @@
 #![feature(nll)]
+
+#[macro_use]
+extern crate core;
+
 use std::io;
 
 #[cfg(test)] mod tests;
@@ -79,7 +83,7 @@ impl Xmodem<()> {
                     Ok(_) => {
                         written += n;
                         (transmitter.progress)(Progress::Packet(transmitter.packet));
-                        transmitter.packet += 1;
+                        transmitter.packet = transmitter.packet.wrapping_add(1);
                         continue 'next_packet;
                     }
                 }
@@ -124,7 +128,7 @@ impl Xmodem<()> {
                         received += n;
                         into.write_all(&packet)?;
                         (receiver.progress)(Progress::Packet(receiver.packet));
-                        receiver.packet += 1;
+                        receiver.packet = receiver.packet.wrapping_add(1);
                         continue 'next_packet;
                     }
                 }
